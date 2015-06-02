@@ -80,18 +80,22 @@ cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 c
       implicit real*8 (a-h,o-z)
       
-      integer fout,foutbj,fouttj,bootrep
-      parameter (fout=16,foutbj=22,fouttj=23)
+      include 'mkl_vsl.f77' ! to use the MKL library VSL
+
+      integer fout,foutv,foutbj,fouttj
+      parameter (fout=16,foutv = 9, foutbj=22,fouttj=23)
       parameter (maxk=104,maxn=88,maxm=200000,maxnf=50) 
       logical fail,wrpost,dojoint,dogm,lpsloop
       logical standard
       integer kj(maxm),mmodel(maxk),idx(maxm)
       character*12 regname(maxk),fdatname
   
+  
       real*8 z(maxn,maxk),y(maxn),ztz(maxk,maxk),yf(maxnf),
      &   zf(maxk,maxnf),midx(maxm,2),
      &   bayesf(maxm),freq(maxm),gj(maxm),dstar(maxm),
      &   bstar(maxk,maxm),xdata(maxn,maxk),ydata(maxn)
+     
       
 c
 c  if you want to do more than 25 sample splits change the 25
@@ -100,6 +104,14 @@ c
 
        real*8 avelps(25),bestlps(25),fulllps(25),nulllps(25)
 
+c  some new definition in bootstrap
+      integer bootrep, maxboot, bi,brng, errcode,method
+      parameter(maxboot = 10000)
+      integer boot_inds(maxn, maxboot), rands(maxboot)
+      real*8  xdata_org(maxn,maxk),ydata_org(maxn)
+      real*8  beta(maxk)
+      TYPE (VSL_STREAM_STATE) :: stream
+      common method, stream
 c
 cccccccccccccccccccccccccc
 ccc   setup            ccc
@@ -110,12 +122,72 @@ c
      &      fdatname,standard,
      &      lpsloop,ilps,split,
      &      wrpost,dogm,dojoint,
-     &      fout,foutbj,fouttj)
+     &      fout,foutv,foutbj,fouttj,maxboot)
            
        call readdata(fout,fdatname,
      &       lpsloop,ntot,split,nobs,nf,standard,
      &       kreg,regname,xdata,ydata)
-               
+       
+      write (foutv,'(100a20)') 'Bootstrap.rep', (regname(i), i=1,kreg)  
+
+c     Generating random indexes for all bootstrap  
+      ! generate the random seed first
+!     ***** Initializing *****
+      method = VSL_RNG_METHOD_UNIFORM_STD
+      brng=VSL_BRNG_MT19937
+      errcode=vslnewstream( stream, brng,  idum )
+      ! if (errcode .ne. 0) then 
+      !   write(fout,*) '!!!!! ERROR: bootstrap seed genrates fail !!!!'
+      !write(*,*)    '!!!!! ERROR: bootstrap seed genrates fail !!!!'  
+       !  stop
+      !end if    
+      do 5182 bi = 1,bootrep
+         call gen_srs_with_replace (nobs, nobs, 
+     &   boot_inds(1:nobs,bi))
+5182   end do
+
+  !     ***** Deinitialize *****
+      errcode=vsldeletestream( stream ) 
+      
+   !   if (errcode .ne. 0) then 
+   !      write(fout,*) '!!!!! ERROR: bootstrap seed genrates fail !!!!'
+   !   write(*,*)    '!!!!! ERROR: bootstrap seed genrates fail !!!!'  
+   !      stop
+   !   end if    
+    
+ !      output the random seed of bootstrap
+          open(unit=3, file='bootstrap_seed_row.out',
+     &    ACTION="write", STATUS="replace")
+          do bi = 1,bootrep
+             write(3,'(100i3)') (boot_inds(i,bi), i=1,nobs )        
+          end do
+          close(3)
+ 
+    
+       
+   
+        write(fout,*) '==============================================='
+        write(fout,*) 'Boostrap starts' 
+        write(fout,*) '==============================================='
+      
+       write(*,*) '==============================================='
+       write(*,*) 'Boostrap starts' 
+       write(*,*) '==============================================='     
+   
+   !cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc   
+   ! Boostrap starts from here, repeating the entire process      
+      do 5189 bi = 1,bootrep      
+   !cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc   
+        write(fout,*) ' '
+        write(fout,*) '------------------------------'
+        write(fout,*) 'For the data replicate: ', bi
+        write(fout,*) '------------------------------'
+        write(*,*)    ' '
+        write(*,*) '------------------------------'
+        write(*,*) 'For the data replicate: ', bi
+        write(*,*) '------------------------------'
+        
+          
       call splitdata(fout,regname,idum,ntot,nobs,nf,kreg,
      &      xdata,z,ztz,ydata,y,avey,ssqyn,lpsloop,yf,zf,fail)
       
@@ -163,14 +235,16 @@ c
       write(*,*) '... calling wrchainfo() ...' 
 
       call wrchainfo(regname,kreg,bayesf,midx,bstar,gj,kj,
-     &      imax,nvout,ibm,icut,idx,fout, .false.)
-     
+     &      imax,nvout,ibm,icut,idx,fout, .false.,beta)
+      write(foutv,5193) bi,  (beta(i), i=1,kreg)  
+5193  format(i3,t10,100f12.5)     
       call wr_date(fout,.true.,.true.)
 c
 ccccccccccccccccccccccccccc
 ccc     jointness       ccc
 ccccccccccccccccccccccccccc
 c
+            ! this part is not using in our study, sdg
       if (dojoint) then
          call jointness(kreg,bayesf,midx,
      &         imax,fout,foutbj,fouttj,fail)
@@ -194,6 +268,8 @@ c  within-smaple prediction   c
 ccccccccccccccccccccccccccccccc
 c   
 c 
+      
+      ! this part is not using in our study, sdg
       if (lpsloop) then
          write(*,*) '... looping LPS ...'   
          write(fout,*)
@@ -252,13 +328,15 @@ c
    56    enddo
          call barra('L',75,fout)
          write(fout,*)
-      endif
+         endif
 c 
 c
 ccccccccccccccccccccccccccc
 ccc    convergence      ccc
 ccccccccccccccccccccccccccc
-c
+c  
+      ! this part is not using in our study, sdg
+      ! keep it simple   
       if (dogm) then
          call convergence(regname,
      &         iprior,idum,initrep,mnumrep,nobs,kreg,
@@ -269,8 +347,19 @@ c
 c
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 c          
+     
+
+ !cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc   
+5189  end do
+      ! Boostrap ends from here, repeating the entire process finished         
+ !cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc 
+      write(foutv,*) '_________________________________________________'
+      close(foutv)
       stop
       end
+      
+      
+      
 c
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -299,11 +388,11 @@ c
      &      fdatname,standard,
      &      lpsloop,ilps,split,
      &      wrpost,dogm,dojoint,
-     &      fout,foutbj,fouttj)     !sdg
+     &      fout,foutv,foutbj,fouttj,maxboot)     !sdg
 c
       implicit real*8(a-h,o-z)
       
-      integer fout,fpar,foutbj,fouttj
+      integer fout,foutv,fpar,foutbj,fouttj,maxboot
       parameter(fpar=19)    
       logical wrpost,lpsloop,dogm,dojoint,standard
       character*10 nombre
@@ -315,45 +404,74 @@ c
       open(unit=fpar,file='fls.par')     
 
       read(fpar,'(a10)') nombre
+      !read(fpar,'(a10)') var_incl_boot
+      open(unit=foutv, file=nombre//'_var_incl.out')
       open(unit=fout, file=nombre//'.out')
       
       read(fpar,*) fdatname
          
       call wr_date(fout,.true.,.true.)
       write(fout,*)
-      write(fout,'(" This file is ",a15)') nombre//'.out'
-      write(*,   '(" Out file is  ",a15)') nombre//'.out'
-      
+      write(fout,'(" This file is ",a15)') nombre//'.out' 
+      write(fout,'(" The variable out file is   ",a20)') 
+     & nombre//'_var_incl.out' 
+      write(foutv,'(" This file is ",a20)') nombre//'_var_incl.out'     
+      write(*,   '(" The all records file  is  ",a15)') nombre//'.out'
+      write(*,   '(" The variable out file is  ",a20)') 
+     & nombre//'_var_incl.out'
+      write(foutv,*)
+      write(foutv,'("The all records file is ",a15)') nombre//'.out'
+
       write(fout,'(" Data file is ",a15)') fdatname
+      write(foutv,'(" Data file is ",a15)') fdatname
       write(*,   '(" Data file is ",a15)') fdatname
       
       write(fout,*)
+      write(foutv,*)
       call barra('-',55,fout)
       read(fpar,*) idum
       if (idum.gt.0) idum=-idum
       write(fout,*) '.. random seed ......................',idum
+      write(foutv,*) '.. random seed ......................',idum
       write(*,*)    '.. random seed ......................',idum
       read(fpar,*) iprior
       if ((iprior.lt.1).or.(iprior.gt.9)) then
       write(*,*)    'error: iprior must be between 1 and 9!!!'
       write(fout,*) 'error: iprior must be between 1 and 9!!!'
+      write(foutv,*) 'error: iprior must be between 1 and 9!!!'
       close(fout)
       stop
       endif
       write(fout,*) '.. prior ............................',iprior
+      write(foutv,*) '.. prior ............................',iprior
       write(*,*)    '.. prior ............................',iprior
       read(fpar,*) initrep
       write(fout,*) '.. burn-in draws ....................',initrep
+      write(foutv,*) '.. prior ............................',iprior
       write(*,*)    '.. burn-in draws ....................',initrep
       read(fpar,*) mnumrep
       write(fout,*) '.. mc3 draws.........................',mnumrep
+      write(foutv,*) '.. prior ............................',iprior
       write(*,*)    '.. mc3 draws.........................',mnumrep
       read(fpar,*) bootrep 
+      
+      if (bootrep .gt. maxboot) then
+         write(fout,*) 'Bootstrap replicates is over the limits 10000!!'
+        write(foutv,*) 'Bootstrap replicates is over the limits 10000!!'
+         write(*,*)    'Bootstrap replicates is over the limits 10000!!'
+         close(fout)
+         close(foutv)
+         stop
+      end if
+      
+      
       write(fout,*) '.. bootstrap data replicates ........',bootrep
+      write(foutv,*) '.. bootstrap data replicates ........',bootrep
       write(*,*)    '.. bootstrap data replicates ........',bootrep
       read(fpar,18) standard
       if (standard) then 
         write(fout,*) '.. Xs will be standardised'
+        write(foutv,*) '.. Xs will be standardised'
         write(*,*)    '.. Xs will be standardised'
       endif
       read(fpar,18) lpsloop
@@ -370,7 +488,8 @@ c
       write(fout,*) '.. will do G&M.......................'
       write(*,*)    '.. will do G&M.......................'
       endif
-
+      
+       
       read(fpar,18) dojoint
       if (dojoint) then
         write(fout,*) '.. will do Jointness Stuff...........'
@@ -382,6 +501,7 @@ c
  17     format(' ... accompanying file: ',a20)
       endif
       
+      write(foutv,*) '_________________________________________________'
       
   18   format(l1)
       close(fpar)
@@ -389,6 +509,45 @@ c
       return
       end
 c
+      
+      
+            
+ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+c
+   ! Write a function to general simple random sampling with 
+   ! replacement         
+c       
+ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      subroutine gen_srs_with_replace (num_to_draw, max_ind, gens)
+            
+      implicit real*8(a-h,o-z)
+      
+
+      integer num_to_draw, max_ind, gens(num_to_draw)   
+      integer method,brng, seed, i
+      INTEGER*4 errcode
+      common method, stream
+      !INTEGER*4 stream(2)
+      real a,b, xr(num_to_draw), xrt
+      
+      
+      ! use the MKL library to sample
+       a = 0d0
+       b = 1d0
+
+!     ***** Generating *****
+      errcode=vsrnguniform( method, stream, num_to_draw, xr ,a ,b )
+
+       
+      do 5181 i = 1,num_to_draw
+         xrt = xr(i)*real(max_ind)      
+         gens(i) = ceiling(xrt)
+5181  end do
+      
+            
+      end subroutine 
+      
+      
       
       
 ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
@@ -694,7 +853,7 @@ cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 c
 
       subroutine wrchainfo(regname,kreg,visits,midx,bstar,g0j,kj,
-     &      imax,nvout,ibm,icut,indx,fout,justcut)
+     &      imax,nvout,ibm,icut,indx,fout,justcut,beta)
 
       implicit real*8(a-h,o-z)
       parameter(maxm=200000,thres=0.25d0,maxk=104) 
@@ -1272,7 +1431,7 @@ c
        integer kj(maxm),mmodel(maxk),idx(maxm),ir(maxk)
        character*12 regname(maxk)
 
-       real*8 z(maxn,maxk), y(maxn), ztz(maxk,maxk),
+       real*8 z(maxn,maxk), y(maxn), ztz(maxk,maxk),beta(maxk),
      & midx(maxm,2),midx2(maxm,2),fjout,
      & bayesf(maxm),freq(maxm),bayesf2(maxm),freq2(maxm),
      & gj(maxm),dstar(maxm),bstar(maxk,maxm)
@@ -1307,7 +1466,7 @@ c
        endif
       
        call wrchainfo(regname,kreg,bayesf2,midx2,bstar,gj,kj,
-     &      imax2,nvout,ibm,icut,idx,fout, .false.)
+     &      imax2,nvout,ibm,icut,idx,fout, .false.,beta)
           
       write(*,*) '... G&M: done w/ wrchaininfo ...'
       call wr_date(fout,.true.,.true.)
