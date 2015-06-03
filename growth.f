@@ -82,12 +82,12 @@ c
       
       include 'mkl_vsl.f77' ! to use the MKL library VSL
 
-      integer fout,foutv,foutbj,fouttj
-      parameter (fout=16,foutv = 9, foutbj=22,fouttj=23)
+      integer fout,foutv,foutm,foutbj,fouttj
+      parameter (fout=16,foutv = 9, foutm = 11, foutbj=22,fouttj=23)
       parameter (maxk=104,maxn=88,maxm=200000,maxnf=50) 
       logical fail,wrpost,dojoint,dogm,lpsloop
       logical standard
-      integer kj(maxm),mmodel(maxk),idx(maxm)
+      integer kj(maxm),mmodel(maxk),idx(maxm),models(maxk)
       character*12 regname(maxk),fdatname
   
   
@@ -106,10 +106,12 @@ c
 
 c  some new definition in bootstrap
       integer bootrep, maxboot, bi,brng, errcode,method
-      parameter(maxboot = 10000)
+      integer max_top, top_num,ir(maxk),kjj
+      parameter(maxboot = 10000, max_top = 100)
       integer boot_inds(maxn, maxboot), rands(maxboot)
+      real*8  top_midx(max_top,2)
       real*8  xdata_org(maxn,maxk),ydata_org(maxn)
-      real*8  beta(maxk)
+      real*8  beta(maxk),percvisits, top_mod_post(max_top)
       TYPE (VSL_STREAM_STATE) :: stream
       common method, stream
 c
@@ -118,17 +120,16 @@ ccc   setup            ccc
 cccccccccccccccccccccccccc
 c
        call setup(               
-     &      iprior,idum,initrep,mnumrep,bootrep,
+     &      iprior,idum,initrep,mnumrep,bootrep,top_num,
      &      fdatname,standard,
      &      lpsloop,ilps,split,
      &      wrpost,dogm,dojoint,
-     &      fout,foutv,foutbj,fouttj,maxboot)
+     &      fout,foutv,foutm,foutbj,fouttj,maxboot,max_top)
            
        call readdata(fout,fdatname,
      &       lpsloop,ntot,split,nobs,nf,standard,
-     &       kreg,regname,xdata,ydata)
+     &       kreg,regname,xdata_org,ydata_org)
        
-      write (foutv,'(100a20)') 'Bootstrap.rep', (regname(i), i=1,kreg)  
 
 c     Generating random indexes for all bootstrap  
       ! generate the random seed first
@@ -141,10 +142,10 @@ c     Generating random indexes for all bootstrap
       !write(*,*)    '!!!!! ERROR: bootstrap seed genrates fail !!!!'  
        !  stop
       !end if    
-      do 5182 bi = 1,bootrep
+      do 5102 bi = 1,bootrep
          call gen_srs_with_replace (nobs, nobs, 
      &   boot_inds(1:nobs,bi))
-5182   end do
+5102   end do
 
   !     ***** Deinitialize *****
       errcode=vsldeletestream( stream ) 
@@ -163,17 +164,107 @@ c     Generating random indexes for all bootstrap
           end do
           close(3)
  
-    
-       
-   
+    ! run the MC3 on the original data once to find the optimial models
+        call wr_date(fout,.true.,.true.)
+        call wr_date(foutm,.true.,.true.)
+        write(fout,*) '%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%'
+        write(fout,*) 'run the MC3 on the original data once' 
+        write(fout,*) 'in order to find the optimial models' 
+        write(fout,*) '%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%'
+               
+      call splitdata(fout,regname,idum,ntot,nobs,nf,kreg,
+     &      xdata_org,z,ztz,ydata_org,y,avey,ssqyn,lpsloop,yf,zf,fail)
+      
+c      write(*,*) 'Splitdata:',fail
+      
+      call ols(fout,regname,nobs,kreg,z,ztz,y,avey,fail)
+      
+c      write(*,*) 'OLS:',fail
+      
+    !  call wr_date(fout,.true.,.true.)
+      
+      if (fail) then
+         write(fout,*) '!!! setup block fail !!!'
+         write(*,*)    '!!! setup block fail !!!' 
+         close(fout)
+         stop
+      else
+         write(*,*)    ' ... setup block done ... '         
+      endif
+c
+cccccccccccccccccccccccccc
+ccc   run chain        ccc
+cccccccccccccccccccccccccc
+c
+      call runchain(iprior,idum,initrep,mnumrep,nobs,kreg,
+     &   ztz,z,y,ssqyn,
+     &   freq,bayesf,gj,dstar,bstar,midx,kj,
+     &   imax,nvout,fout,fjout,fjsum,fail)
+
+      write(*,*) '... chain done! ',imax
+      if (fail) then
+         write(fout,*) ' !!! fail running chain!!'
+         stop
+      endif
+      if (nvout.gt.0) then
+         write(fout,*) ' !!! ',nvout,' visits out!!!'
+         write(fout,*) ' !!! mass',fjout,' visits out!!!'
+      endif
+ !     call wr_date(fout,.true.,.true.)
+c
+ccccccccccccccccccccccccccc
+ccc  write chain info   ccc
+ccccccccccccccccccccccccccc
+c
+      write(*,*) '... calling wrchainfo() ...' 
+
+      
+      call wrchainfo(regname,kreg,bayesf,midx,bstar,gj,kj,
+     &      imax,nvout,ibm,icut,idx,fout, .false.,beta)
+      
+      ! idx save the desending order of models
+      write(foutm,*) '#################################################'
+      write(foutm,*) '# Top models have been picked by original data  #'
+      write(foutm,*) '#################################################'
+      call barra('-',55,foutm)
+      do i = 1,top_num    
+                 ! print the top models information in foutm
+         call g2model2(midx(idx(i),1),midx(idx(i),2),
+     &         kreg,models,kjj,ir)      
+            percvisits = bayesf(idx(i))*100.0d0
+            write(foutm,1467) i, percvisits,(ir(k),k=1,kjj)
+ 1467       format(i3,t5,f6.2,'%',x,'|',100(:i3))         
+         ! return the indexes of top models
+           top_midx(i,1:2) = midx(idx(i), 1:2)
+      end do    
+      call barra('-',55,foutm)
+          
+        call wr_date(fout,.true.,.true.)
+        call wr_date(foutv,.true.,.true.)
+        call wr_date(foutm,.true.,.true.)
+        
         write(fout,*) '==============================================='
         write(fout,*) 'Boostrap starts' 
         write(fout,*) '==============================================='
+        write(foutv,*) '==============================================='
+        write(foutv,*) 'Boostrap starts' 
+        write(foutv,*) '==============================================='
+        write(foutm,*) '==============================================='
+        write(foutm,*) 'Boostrap starts' 
+        write(foutm,*) '==============================================='
+                    
       
        write(*,*) '==============================================='
        write(*,*) 'Boostrap starts' 
        write(*,*) '==============================================='     
-   
+       
+      call barra('-',100,foutv) 
+      write (foutv,'(100a20)') 'Bootstrap.rep', (regname(i), i=1,kreg)  
+      call barra('-',100,foutv) 
+      
+      call barra('-',100,foutm) 
+      write (foutm,*) 'Bootstrap.rep\Top models from 1 to ', top_num 
+      call barra('-',100,foutm) 
    !cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc   
    ! Boostrap starts from here, repeating the entire process      
       do 5189 bi = 1,bootrep      
@@ -186,6 +277,10 @@ c     Generating random indexes for all bootstrap
         write(*,*) '------------------------------'
         write(*,*) 'For the data replicate: ', bi
         write(*,*) '------------------------------'
+        xdata = xdata_org
+        xdata(1:nobs,1:maxk) = xdata_org(boot_inds(1:nobs,bi), 1:maxk)
+        ydata = ydata_org
+        ydata(1:nobs) = ydata_org(boot_inds(1:nobs,bi))  
         
           
       call splitdata(fout,regname,idum,ntot,nobs,nf,kreg,
@@ -234,11 +329,23 @@ ccccccccccccccccccccccccccc
 c
       write(*,*) '... calling wrchainfo() ...' 
 
+      
       call wrchainfo(regname,kreg,bayesf,midx,bstar,gj,kj,
      &      imax,nvout,ibm,icut,idx,fout, .false.,beta)
+      
+      ! add line for variable inclusion
       write(foutv,5193) bi,  (beta(i), i=1,kreg)  
+      ! add line for top model 
+      call check_top_mod_post(bayesf,midx,imax,top_num,top_midx,
+     & top_mod_post)
+      write(foutm,5193) bi, (top_mod_post(i), i=1,top_num) 
+      
 5193  format(i3,t10,100f12.5)     
       call wr_date(fout,.true.,.true.)
+      
+      
+      
+      
 c
 ccccccccccccccccccccccccccc
 ccc     jointness       ccc
@@ -354,6 +461,12 @@ c
       ! Boostrap ends from here, repeating the entire process finished         
  !cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc 
       write(foutv,*) '_________________________________________________'
+      
+        call wr_date(fout,.true.,.true.)
+        call wr_date(foutv,.true.,.true.)
+        call wr_date(foutm,.true.,.true.)
+      
+      close(foutm)
       close(foutv)
       stop
       end
@@ -384,20 +497,20 @@ ccc                                                                  ccc
 cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 c
       subroutine setup(
-     &      iprior,idum,initrep,mnumrep,bootrep,
+     &      iprior,idum,initrep,mnumrep,bootrep,top_num,
      &      fdatname,standard,
      &      lpsloop,ilps,split,
      &      wrpost,dogm,dojoint,
-     &      fout,foutv,foutbj,fouttj,maxboot)     !sdg
+     &      fout,foutv,foutm,foutbj,fouttj,maxboot,max_top)     !sdg
 c
       implicit real*8(a-h,o-z)
       
-      integer fout,foutv,fpar,foutbj,fouttj,maxboot
+      integer fout,foutv,foutm,fpar,foutbj,fouttj,maxboot,top_num
       parameter(fpar=19)    
       logical wrpost,lpsloop,dogm,dojoint,standard
       character*10 nombre
       character*12 fdatname
-      integer initrep,mnumrep,bootrep    !sdg
+      integer initrep,mnumrep,bootrep,max_top    !sdg
 c
 c  read paremeters
 c
@@ -405,7 +518,10 @@ c
 
       read(fpar,'(a10)') nombre
       !read(fpar,'(a10)') var_incl_boot
+      ! output for variable selction 
       open(unit=foutv, file=nombre//'_var_incl.out')
+      ! output for top model selection 
+      open(unit=foutm, file=nombre//'_mod_post.out')
       open(unit=fout, file=nombre//'.out')
       
       read(fpar,*) fdatname
@@ -413,26 +529,43 @@ c
       call wr_date(fout,.true.,.true.)
       write(fout,*)
       write(fout,'(" This file is ",a15)') nombre//'.out' 
-      write(fout,'(" The variable out file is   ",a20)') 
+      write(fout,'(" The variable out file is   ",a30)') 
      & nombre//'_var_incl.out' 
+      write(fout,'(" The top model out file is   ",a30)') 
+     & nombre//'_mod_post.out' 
+      
       write(foutv,'(" This file is ",a20)') nombre//'_var_incl.out'     
       write(*,   '(" The all records file  is  ",a15)') nombre//'.out'
-      write(*,   '(" The variable out file is  ",a20)') 
+      write(*,   '(" The variable out file is  ",a30)') 
      & nombre//'_var_incl.out'
+      write(*,   '(" The top model out file is  ",a30)') 
+     & nombre//'_mod_post.out'
+      
       write(foutv,*)
       write(foutv,'("The all records file is ",a15)') nombre//'.out'
-
+      write(foutm,*)
+      write(foutm,'("The all records file is ",a15)') nombre//'.out'
+      
       write(fout,'(" Data file is ",a15)') fdatname
       write(foutv,'(" Data file is ",a15)') fdatname
+      write(foutm,'(" Data file is ",a15)') fdatname
       write(*,   '(" Data file is ",a15)') fdatname
+      
+      ! Header for output of top models
+
+      
       
       write(fout,*)
       write(foutv,*)
+      write(foutm,*)
       call barra('-',55,fout)
+            call barra('-',55,foutv)
+                  call barra('-',55,foutm)
       read(fpar,*) idum
       if (idum.gt.0) idum=-idum
       write(fout,*) '.. random seed ......................',idum
       write(foutv,*) '.. random seed ......................',idum
+      write(foutm,*) '.. random seed ......................',idum
       write(*,*)    '.. random seed ......................',idum
       read(fpar,*) iprior
       if ((iprior.lt.1).or.(iprior.gt.9)) then
@@ -444,30 +577,52 @@ c
       endif
       write(fout,*) '.. prior ............................',iprior
       write(foutv,*) '.. prior ............................',iprior
+      write(foutm,*) '.. prior ............................',iprior      
       write(*,*)    '.. prior ............................',iprior
       read(fpar,*) initrep
       write(fout,*) '.. burn-in draws ....................',initrep
-      write(foutv,*) '.. prior ............................',iprior
+      write(foutv,*) '.. burn-in draws ....................',initrep
+      write(foutm,*) '.. burn-in draws ....................',initrep
       write(*,*)    '.. burn-in draws ....................',initrep
       read(fpar,*) mnumrep
       write(fout,*) '.. mc3 draws.........................',mnumrep
-      write(foutv,*) '.. prior ............................',iprior
+      write(foutv,*) '.. mc3 draws ............................',mnumrep
+      write(foutm,*) '.. mc3 draws ............................',mnumrep
       write(*,*)    '.. mc3 draws.........................',mnumrep
       read(fpar,*) bootrep 
       
       if (bootrep .gt. maxboot) then
          write(fout,*) 'Bootstrap replicates is over the limits 10000!!'
         write(foutv,*) 'Bootstrap replicates is over the limits 10000!!'
+        write(foutm,*) 'Bootstrap replicates is over the limits 10000!!'
          write(*,*)    'Bootstrap replicates is over the limits 10000!!'
          close(fout)
          close(foutv)
+         close(foutm)
          stop
       end if
       
+      read(fpar,*) top_num  
+      if (top_num .gt. max_top) then
+         write(fout,*) 'Top number of models is over the limits 100!!'
+        write(foutm,*) 'Top number of models is over the limits 100!!'
+         write(*,*)    'Top number of models is over the limits 100!!'
+         close(fout)
+         close(foutv)
+         close(foutm)
+         stop
+      end if
       
       write(fout,*) '.. bootstrap data replicates ........',bootrep
       write(foutv,*) '.. bootstrap data replicates ........',bootrep
+      write(foutm,*) '.. bootstrap data replicates ........',bootrep
       write(*,*)    '.. bootstrap data replicates ........',bootrep
+      
+      write(fout,*) '.. The number of top models to present ..',top_num
+      write(foutv,*) '.. The number of top models to present ..',top_num
+      write(foutm,*) '.. The number of top models to present ..',top_num
+      write(*,*) '.. The number of top models to present ..',top_num
+      
       read(fpar,18) standard
       if (standard) then 
         write(fout,*) '.. Xs will be standardised'
@@ -845,20 +1000,54 @@ c
 c
 cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 ccc                                                                  ccc
+ccc  subroutine check_top_mod_post                                   ccc
+ccc                                                                  ccc
+ccc  modified: Shutong Ding, 2015-06-01                              ccc
+ccc                                                                  ccc
+cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+c    
+      subroutine check_top_mod_post(visits,midx,imax,top_num,top_midx,
+     & top_mod_post )
+       
+      implicit real*8(a-h,o-z)
+      integer maxm, max_top, top_num, imax, ix, jx
+      parameter(maxm = 200000, max_top = 100)
+      real*8 visits(maxm),midx(maxm,2),top_midx(max_top,2), 
+     & top_mod_post(max_top)
+      
+      ! initializing, if not visited, default set to 0
+      top_mod_post = 0d0
+      
+      do 5195 jx = 1,top_num
+      do 5191 ix = 1,imax
+          ! search over the all visited models to find matches
+          if ((midx(ix,1) .eq. top_midx(jx,1)) .and. (midx(ix,2) .eq. 
+     &    top_midx(jx,2)) ) then   ! both indexes matches
+             top_mod_post(jx) = visits(ix)      
+          end if    
+5191  continue    
+5195  end do
+      
+      end subroutine check_top_mod_post
+      
+c
+cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+ccc                                                                  ccc
 ccc  subroutine wrchainfo                                            ccc
 ccc                                                                  ccc
 ccc  modified: july 06                                               ccc
 ccc                                                                  ccc
 cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 c
-
+c     modified to check the top listed models, sdg
+       
       subroutine wrchainfo(regname,kreg,visits,midx,bstar,g0j,kj,
      &      imax,nvout,ibm,icut,indx,fout,justcut,beta)
 
       implicit real*8(a-h,o-z)
       parameter(maxm=200000,thres=0.25d0,maxk=104) 
       logical justcut
-      integer model(maxk),ir(maxk),fout,
+      integer model(maxk),ir(maxk),fout,kjj,
      &      indxx(maxm),indx(maxm),kj(maxm)
       real*8 visits(maxm),beta(maxk),bb(maxk),bbb(maxk),
      &      bstar(maxk,maxm),g0j(maxm),midx(maxm,2),
