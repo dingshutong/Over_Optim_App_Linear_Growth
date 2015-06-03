@@ -519,33 +519,36 @@ c
       read(fpar,'(a10)') nombre
       !read(fpar,'(a10)') var_incl_boot
       ! output for variable selction 
-      open(unit=foutv, file=nombre//'_var_incl.out')
+      open(unit=foutv, file=trim(adjustl(nombre))//'_var_incl.out')
       ! output for top model selection 
-      open(unit=foutm, file=nombre//'_mod_post.out')
-      open(unit=fout, file=nombre//'.out')
+      open(unit=foutm, file=trim(adjustl(nombre))//'_mod_post.out')
+      open(unit=fout, file=trim(adjustl(nombre))//'.out')
       
       read(fpar,*) fdatname
          
       call wr_date(fout,.true.,.true.)
       write(fout,*)
-      write(fout,'(" This file is ",a15)') nombre//'.out' 
+      write(fout,'(" This file is ",a15)') trim(adjustl(nombre))//'.out' 
       write(fout,'(" The variable out file is   ",a30)') 
      & nombre//'_var_incl.out' 
       write(fout,'(" The top model out file is   ",a30)') 
      & nombre//'_mod_post.out' 
       
-      write(foutv,'(" This file is ",a20)') nombre//'_var_incl.out'     
-      write(*,   '(" The all records file  is  ",a15)') nombre//'.out'
+      write(foutv,'(" This file is ",a20)') trim(adjustl(nombre))
+     & //'_var_incl.out'     
+      write(*,   '(" The all records file  is  ",a15)') 
+     & trim(adjustl(nombre))//'.out'
       write(*,   '(" The variable out file is  ",a30)') 
-     & nombre//'_var_incl.out'
+     & trim(adjustl(nombre))//'_var_incl.out'
       write(*,   '(" The top model out file is  ",a30)') 
-     & nombre//'_mod_post.out'
+     & trim(adjustl(nombre))//'_mod_post.out'
       
       write(foutv,*)
-      write(foutv,'("The all records file is ",a15)') nombre//'.out'
+      write(foutv,'("The all records file is ",a15)') 
+     & trim(adjustl(nombre))//'.out'
       write(foutm,*)
-      write(foutm,'("The all records file is ",a15)') nombre//'.out'
-      
+      write(foutm,'("The all records file is ",a15)') 
+     & trim(adjustl(nombre))//'.out' 
       write(fout,'(" Data file is ",a15)') fdatname
       write(foutv,'(" Data file is ",a15)') fdatname
       write(foutm,'(" Data file is ",a15)') fdatname
