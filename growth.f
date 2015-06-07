@@ -86,7 +86,7 @@ c
       parameter (fout=16,foutv = 9, foutm = 11, foutbj=22,fouttj=23)
       parameter (maxk=104,maxn=88,maxm=200000,maxnf=50) 
       logical fail,wrpost,dojoint,dogm,lpsloop
-      logical standard
+      logical standard,fix_start
       integer kj(maxm),mmodel(maxk),idx(maxm),models(maxk)
       character*12 regname(maxk),fdatname
   
@@ -105,7 +105,7 @@ c
        real*8 avelps(25),bestlps(25),fulllps(25),nulllps(25)
 
 c  some new definition in bootstrap
-      integer bootrep, maxboot, bi,brng, errcode,method
+      integer bootrep, maxboot, bi,brng, errcode,method,prev_acc
       integer max_top, top_num,ir(maxk),kjj,acc_count,fail_count
       parameter(maxboot = 10000, max_top = 100)
       integer boot_inds(maxn), rands(maxboot)
@@ -126,7 +126,7 @@ c
      &      fdatname,standard,
      &      lpsloop,ilps,split,
      &      wrpost,dogm,dojoint,
-     &      fout,foutv,foutm,foutbj,fouttj,maxboot,max_top)
+     &      fout,foutv,foutm,foutbj,fouttj,maxboot,max_top,fix_start)
            
        call readdata(fout,fdatname,
      &       lpsloop,ntot,split,nobs,nf,standard,
@@ -201,7 +201,7 @@ cccccccccccccccccccccccccc
 ccc   run chain        ccc
 cccccccccccccccccccccccccc
 c
-      call runchain(iprior,idum,initrep,mnumrep,nobs,kreg,
+      call runchain(fix_start,iprior,idum,initrep,mnumrep,nobs,kreg,
      &   ztz,z,y,ssqyn,
      &   freq,bayesf,gj,dstar,bstar,midx,kj,
      &   imax,nvout,fout,fjout,fjsum,fail)
@@ -276,7 +276,8 @@ c
    !cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc   
         if (acc_count .eq. bootrep) then
             exit 
-        end if     
+        end if 
+        prev_acc = acc_count
         ! generate srs sampler
 1881    call ran_srs(idum,nobs,nobs,boot_inds(1:nobs)) 
           
@@ -316,15 +317,14 @@ c      write(*,*) 'OLS:',fail
       else
          write(fout,*) '... setup block done ...'
          write(*,*)    ' ... setup block done ... '         
-         acc_count = acc_count + 1
-         write(3,'(100i3)') (boot_inds(i), i=1,nobs )       
+         acc_count = acc_count + 1   
       endif
 c
 cccccccccccccccccccccccccc
 ccc   run chain        ccc
 cccccccccccccccccccccccccc
 c
-      call runchain(iprior,idum,initrep,mnumrep,nobs,kreg,
+      call runchain(fix_start,iprior,idum,initrep,mnumrep,nobs,kreg,
      &   ztz,z,y,ssqyn,
      &   freq,bayesf,gj,dstar,bstar,midx,kj,
      &   imax,nvout,fout,fjout,fjsum,fail)
@@ -332,13 +332,23 @@ c
       write(*,*) '... chain done! ',imax
       if (fail) then
          write(fout,*) ' !!! fail running chain!!'
-         stop
+         acc_count = acc_count - 1
+         fail_count = fail_count + 1
+         write(13,'(100i3)') (boot_inds(i), i=1,nobs )   
+         go to 1881
+        ! stop
       endif
       if (nvout.gt.0) then
          write(fout,*) ' !!! ',nvout,' visits out!!!'
          write(fout,*) ' !!! mass',fjout,' visits out!!!'
       endif
+      
+      if (acc_count .ne. prev_acc) then 
+           write(3,'(100i3)') (boot_inds(i), i=1,nobs )    
+      end if 
+      
       call wr_date(fout,.true.,.true.)
+      
 c
 ccccccccccccccccccccccccccc
 ccc  write chain info   ccc
@@ -418,7 +428,8 @@ c
             call splitdata(fout,regname,idum,ntot,nobs,nf,kreg,
      &            xdata,z,ztz,ydata,y,avey,ssqyn,lpsloop,yf,zf,fail)
             
-            call runchain(iprior,idum,initrep,mnumrep,nobs,kreg,
+            call runchain(fix_start,iprior,idum,initrep,mnumrep,nobs,
+     &       kreg,
      &            ztz,z,y,ssqyn,
      &            freq,bayesf,gj,dstar,bstar,midx,kj,
      &            imax,nvout,fout,fjout,fjsum,fail)
@@ -466,7 +477,7 @@ c
      &         iprior,idum,initrep,mnumrep,nobs,kreg,
      &         ztz,z,y,ssqyn,
      &         freq,bayesf,gj,dstar,bstar,midx,kj,
-     &         imax,nvout,icut,fout,fail,fjout,mmodel,fjsum)
+     &         imax,nvout,icut,fout,fail,fjout,mmodel,fjsum,fix_start)
       endif
 c
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -521,13 +532,14 @@ c
      &      fdatname,standard,
      &      lpsloop,ilps,split,
      &      wrpost,dogm,dojoint,
-     &      fout,foutv,foutm,foutbj,fouttj,maxboot,max_top)     !sdg
+     &      fout,foutv,foutm,foutbj,fouttj,maxboot,max_top,fix_start)   
+      !sdg
 c
       implicit real*8(a-h,o-z)
       
       integer fout,foutv,foutm,fpar,foutbj,fouttj,maxboot,top_num
       parameter(fpar=19)    
-      logical wrpost,lpsloop,dogm,dojoint,standard
+      logical wrpost,lpsloop,dogm,dojoint,standard,fix_start
       character*10 nombre
       character*12 fdatname
       integer initrep,mnumrep,bootrep,max_top    !sdg
@@ -678,6 +690,12 @@ c
         write(fout,17) nombre//'.tj.out'
  17     format(' ... accompanying file: ',a20)
       endif
+      
+      read(fpar,18) fix_start
+      if (fix_start) then
+        write(fout,*) '.. The starting chain is always fixed...........'
+        write(*,*)    '.. The starting chain is always fixed...........'
+      end if
       
       write(foutv,*) '_________________________________________________'
       
@@ -1653,14 +1671,14 @@ c
      &   iprior,idum,initrep,mnumrep,nobs,kreg,
      &   ztz,z,y,ssqyn,
      &   freq,bayesf,gj,dstar,bstar,midx,kj,
-     &   imax,nvout,icut,fout,fail,fjout,mmodel,fjsum)   
+     &   imax,nvout,icut,fout,fail,fjout,mmodel,fjsum,fix_start)   
 
        implicit real*8(a-h,o-z)
        parameter(maxm=200000,maxk=104,maxn=88)
        
        integer fout     
        integer iprior,idum,initrep,mnumrep,nobs     
-       logical fail,visited,allvis
+       logical fail,visited,allvis,fix_start
        integer kj(maxm),mmodel(maxk),idx(maxm),ir(maxk)
        character*12 regname(maxk)
 
@@ -1683,7 +1701,7 @@ c  things we don't want to overwrite:
 c
 c     freq2, bayesf2, midx2, imax2, fjsum2
 c     
-       call runchain(iprior,idum,initrep,mnumrep,nobs,kreg,
+       call runchain(fix_start,iprior,idum,initrep,mnumrep,nobs,kreg,
      &       ztz,z,y,ssqyn,
      &       freq2,bayesf2,gj,dstar,bstar,midx2,kj,
      &       imax2,nvout,fout,fjout,fjsum2,fail)     
@@ -2441,8 +2459,8 @@ ccc  modified:                                                       ccc
 ccc                                                                  ccc
 cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 c
-      subroutine runchain(iprior,idum,initrep,mnumrep,nobs,kreg,
-     &      ztz,z,y,ssqyn,
+      subroutine runchain(fix_start,iprior,idum,initrep,mnumrep,nobs,
+     &      kreg,ztz,z,y,ssqyn,
      &      visits,fjlog,g0j,dstar,bstar,
      &      midx,kj,
      &      imax,nvout,fout,fjout,fjsum,fail)
@@ -2452,7 +2470,7 @@ c
       parameter(maxm=200000,maxm2=5000,maxk=104,maxn=88)
 c  dummy arguments:
       real*8 z(maxn,maxk),y(maxn),ztz(maxk,maxk),bstar(maxk,maxm)
-      logical fail 
+      logical fail, fix_start 
       integer kj(maxm)
 c local vars:      
       real*8 visits(maxm),fjlog(maxm),g0j(maxm),dstar(maxm),
@@ -2460,14 +2478,16 @@ c local vars:
      &      fjstack(maxm2),g0jstack(maxm2),dstarstack(maxm2),
      &      bstarstack(maxk,maxm2)
       logical move, visited, evaluated    
-      real*8 midx(maxm,2),idxstack(maxm2,2),idxold(2),idxnew(2)   
-      integer model(maxk),mc(maxk),kjstack(maxm2)
+      real*8 midx(maxm,2),idxstack(maxm2,2),idxold(2),idxnew(2)
+      integer model(maxk),mc(maxk),kjstack(maxm2),model_start(maxk)
       
 c................................................................
       
       fail = .false.
       fjout = 0.0d0
       nvout = 0
+      model_start = 0
+      model_start(1:10) = 1
 c     
 c-----------------------------------------------------------------------
 c  run mc3
@@ -2481,12 +2501,20 @@ c **k67**
       
       
       if (kreg.gt.52) then
+         if (fix_start) then
+               call get2modidx(kreg, model_start,idxold(1),idxold(2)) 
+         else  
          idxold(1) =  (ran2(idum)*(2.0d0**52) + 1.0d0)
          k2 = kreg - 52
          idxold(2) =  (ran2(idum)*(2.0d0**k2) + 1.0d0)
-         else
+         end if
+      else
+         if (fix_start) then
+             idxold(1) = getmodidx(kreg, model_start)
+         else    
          idxold(1) =  (ran2(idum)*(2.0d0**kreg) + 1.0d0)
          idxold(2) = 0
+         end if
       endif
       call g2model(idxold(1),idxold(2),kreg,model)
       write(fout,*) 
