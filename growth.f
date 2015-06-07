@@ -80,7 +80,7 @@ cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 c
       implicit real*8 (a-h,o-z)
       
-      include 'mkl_vsl.f77' ! to use the MKL library VSL
+ !     include 'mkl_vsl.f77' ! to use the MKL library VSL
 
       integer fout,foutv,foutm,foutbj,fouttj
       parameter (fout=16,foutv = 9, foutm = 11, foutbj=22,fouttj=23)
@@ -106,19 +106,21 @@ c
 
 c  some new definition in bootstrap
       integer bootrep, maxboot, bi,brng, errcode,method
-      integer max_top, top_num,ir(maxk),kjj
+      integer max_top, top_num,ir(maxk),kjj,acc_count,fail_count
       parameter(maxboot = 10000, max_top = 100)
-      integer boot_inds(maxn, maxboot), rands(maxboot)
+      integer boot_inds(maxn), rands(maxboot)
       real*8  top_midx(max_top,2)
       real*8  xdata_org(maxn,maxk),ydata_org(maxn)
       real*8  beta(maxk),percvisits, top_mod_post(max_top)
-      TYPE (VSL_STREAM_STATE) :: stream
-      common method, stream
+  !    TYPE (VSL_STREAM_STATE) :: stream
+ !     common method, stream
 c
 cccccccccccccccccccccccccc
 ccc   setup            ccc
 cccccccccccccccccccccccccc
 c
+      acc_count = 0
+      fail_count = 0
        call setup(               
      &      iprior,idum,initrep,mnumrep,bootrep,top_num,
      &      fdatname,standard,
@@ -134,21 +136,22 @@ c
 c     Generating random indexes for all bootstrap  
       ! generate the random seed first
 !     ***** Initializing *****
-      method = VSL_RNG_METHOD_UNIFORM_STD
-      brng=VSL_BRNG_MT19937
-      errcode=vslnewstream( stream, brng,  idum )
+ !     method = VSL_RNG_METHOD_UNIFORM_STD
+ !     brng=VSL_BRNG_MT19937
+ !     errcode=vslnewstream( stream, brng,  idum )
       ! if (errcode .ne. 0) then 
       !   write(fout,*) '!!!!! ERROR: bootstrap seed genrates fail !!!!'
       !write(*,*)    '!!!!! ERROR: bootstrap seed genrates fail !!!!'  
        !  stop
       !end if    
-      do 5102 bi = 1,bootrep
-         call gen_srs_with_replace (nobs, nobs, 
-     &   boot_inds(1:nobs,bi))
-5102   end do
+!      do 5102 bi = 1,bootrep
+ !        call gen_srs_with_replace (nobs, nobs, 
+ !    &   boot_inds(1:nobs,bi))        
+ !       call ran_srs(idum,nobs,nobs,boot_inds(1:nobs,bi))
+!5102   end do
 
   !     ***** Deinitialize *****
-      errcode=vsldeletestream( stream ) 
+  !    errcode=vsldeletestream( stream ) 
       
    !   if (errcode .ne. 0) then 
    !      write(fout,*) '!!!!! ERROR: bootstrap seed genrates fail !!!!'
@@ -159,10 +162,12 @@ c     Generating random indexes for all bootstrap
  !      output the random seed of bootstrap
           open(unit=3, file='bootstrap_seed_row.out',
      &    ACTION="write", STATUS="replace")
-          do bi = 1,bootrep
-             write(3,'(100i3)') (boot_inds(i,bi), i=1,nobs )        
-          end do
-          close(3)
+          open(unit=13, file='bootstrap_seed_failed.out',
+     &    ACTION="write", STATUS="replace")
+ !         do bi = 1,bootrep
+        !     write(3,'(100i3)') (boot_inds(i,bi), i=1,nobs )        
+!          end do
+!          close(3)
  
     ! run the MC3 on the original data once to find the optimial models
         call wr_date(fout,.true.,.true.)
@@ -187,7 +192,7 @@ c      write(*,*) 'OLS:',fail
          write(fout,*) '!!! setup block fail !!!'
          write(*,*)    '!!! setup block fail !!!' 
          close(fout)
-         stop
+         stop  
       else
          write(*,*)    ' ... setup block done ... '         
       endif
@@ -267,8 +272,14 @@ c
       call barra('-',100,foutm) 
    !cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc   
    ! Boostrap starts from here, repeating the entire process      
-      do 5189 bi = 1,bootrep      
+      do 5189 bi = 1,maxboot      
    !cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc   
+        if (acc_count .eq. bootrep) then
+            exit 
+        end if     
+        ! generate srs sampler
+1881    call ran_srs(idum,nobs,nobs,boot_inds(1:nobs)) 
+          
         write(fout,*) ' '
         write(fout,*) '------------------------------'
         write(fout,*) 'For the data replicate: ', bi
@@ -278,9 +289,9 @@ c
         write(*,*) 'For the data replicate: ', bi
         write(*,*) '------------------------------'
         xdata = xdata_org
-        xdata(1:nobs,1:maxk) = xdata_org(boot_inds(1:nobs,bi), 1:maxk)
+        xdata(1:nobs,1:maxk) = xdata_org(boot_inds(1:nobs), 1:maxk)
         ydata = ydata_org
-        ydata(1:nobs) = ydata_org(boot_inds(1:nobs,bi))  
+        ydata(1:nobs) = ydata_org(boot_inds(1:nobs))  
         
           
       call splitdata(fout,regname,idum,ntot,nobs,nf,kreg,
@@ -297,10 +308,16 @@ c      write(*,*) 'OLS:',fail
       if (fail) then
          write(fout,*) '!!! setup block fail !!!'
          write(*,*)    '!!! setup block fail !!!' 
-         close(fout)
-         stop
+         fail_count = fail_count + 1
+         write(13,'(100i3)') (boot_inds(i), i=1,nobs )    
+         go to 1881
+         !close(fout)
+         !stop
       else
+         write(fout,*) '... setup block done ...'
          write(*,*)    ' ... setup block done ... '         
+         acc_count = acc_count + 1
+         write(3,'(100i3)') (boot_inds(i), i=1,nobs )       
       endif
 c
 cccccccccccccccccccccccccc
@@ -334,11 +351,11 @@ c
      &      imax,nvout,ibm,icut,idx,fout, .false.,beta)
       
       ! add line for variable inclusion
-      write(foutv,5193) bi,  (beta(i), i=1,kreg)  
+      write(foutv,5193) acc_count,  (beta(i), i=1,kreg)  
       ! add line for top model 
       call check_top_mod_post(bayesf,midx,imax,top_num,top_midx,
      & top_mod_post)
-      write(foutm,5193) bi, (top_mod_post(i), i=1,top_num) 
+      write(foutm,5193) acc_count, (top_mod_post(i), i=1,top_num) 
       
 5193  format(i3,t10,100f12.5)     
       call wr_date(fout,.true.,.true.)
@@ -461,13 +478,16 @@ c
       ! Boostrap ends from here, repeating the entire process finished         
  !cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc 
       write(foutv,*) '_________________________________________________'
-      
+      write(fout,*)  'Total number of failed bootstrap replicates :', 
+     & fail_count   
         call wr_date(fout,.true.,.true.)
         call wr_date(foutv,.true.,.true.)
         call wr_date(foutm,.true.,.true.)
       
       close(foutm)
       close(foutv)
+      close(3)
+      close(13)
       stop
       end
       
@@ -675,37 +695,58 @@ c
    ! Write a function to general simple random sampling with 
    ! replacement         
 c       
-ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-      subroutine gen_srs_with_replace (num_to_draw, max_ind, gens)
+cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+c      subroutine gen_srs_with_replace (num_to_draw, max_ind, gens)
+            
+!      implicit real*8(a-h,o-z)
+      
+
+!      integer num_to_draw, max_ind, gens(num_to_draw)   
+!      integer method,brng, seed, i
+!      INTEGER*4 errcode
+!      common method, stream
+!      !INTEGER*4 stream(2)
+!      real a,b, xr(num_to_draw), xrt
+      
+      
+      ! use the MKL library to sample
+!       a = 0d0
+!       b = 1d0
+
+!     ***** Generating *****
+!      errcode=vsrnguniform( method, stream, num_to_draw, xr ,a ,b )
+
+       
+ !     do 5181 i = 1,num_to_draw
+ !        xrt = xr(i)*real(max_ind)      
+ !        gens(i) = ceiling(xrt)
+!5181  end do
+      
+            
+!      end subroutine 
+      
+      
+     
+      
+c      ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      subroutine ran_srs(idum,num_to_draw,max_ind,gens)
             
       implicit real*8(a-h,o-z)
       
 
-      integer num_to_draw, max_ind, gens(num_to_draw)   
-      integer method,brng, seed, i
-      INTEGER*4 errcode
-      common method, stream
-      !INTEGER*4 stream(2)
-      real a,b, xr(num_to_draw), xrt
-      
-      
-      ! use the MKL library to sample
-       a = 0d0
-       b = 1d0
+      integer num_to_draw,max_ind, gens(num_to_draw)
+      integer idum,i
+      real*8  rngs
 
 !     ***** Generating *****
-      errcode=vsrnguniform( method, stream, num_to_draw, xr ,a ,b )
 
-       
-      do 5181 i = 1,num_to_draw
-         xrt = xr(i)*real(max_ind)      
-         gens(i) = ceiling(xrt)
-5181  end do
+      do 5151 i = 1,num_to_draw
+         rngs = ran2(idum)*dble(max_ind)      
+         gens(i) = ceiling(rngs)
+5151  end do
       
             
-      end subroutine 
-      
-      
+      end subroutine
       
       
 ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
