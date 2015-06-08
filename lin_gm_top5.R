@@ -157,6 +157,6 @@ log_mml_gprior_vec(xymat,1:3,kmax,n)
 pmp_all_modes(1:n, xymat, kmax, n, keep_cons = FALSE )
 
 pmp_boot = bootstrap_pmp_all(bootrep, xymat, kmax, keep_cons)
-write.table(file="pmp_all_boot.txt",pmp_boot$pmp, row,names = FALSE, col.names=FALSE)
-write.table(file="pmp_all_models.txt",pmp_boot$model, row,names = FALSE, col.names=FALSE)
+write.table(file="pmp_all_boot.txt",pmp_boot$pmp, row.names = FALSE, col.names=FALSE)
+write.table(file="pmp_all_models.txt",pmp_boot$model, row.names = FALSE, col.names=FALSE)
 
