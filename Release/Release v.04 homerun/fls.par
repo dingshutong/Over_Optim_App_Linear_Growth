@@ -1,0 +1,17 @@
+boot_run         	OUT namefile, change at wish, char8
+grk41t72.dat            DAT namefile
+-1665432		random number seed, enter any integer-81467002 JAE
+9			integer (1-9) specifiying prior, see routine computefj
+100000                  warmup draws
+500000                  chain draws
+1000                    Bootstrap replicates
+20                      Top number of models to present
+F                       standardise Xs??
+F                       LPS?
+5                       LPSloop?
+0.85d0                  real taking care of sample split
+F                       wrpost?
+F                       dogm---do G&M stuff? convergence
+F                       dojoint---do jointness stuff?  See Ley and Steel (2006) "Jointness..."
+T                       fixed starting point of chain, 1:10
+
